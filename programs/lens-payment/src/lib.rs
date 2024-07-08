@@ -1,5 +1,4 @@
 use anchor_lang::prelude::*;
-use anchor_spl::token::{transfer, Transfer};
 declare_id!("4JwBm4nCWHmxRrtc2bSeM6idcsgoBkNdq8VNyFdYYVbR");
 
 const CREATOR: &str = "58V6myLoy5EVJA3U2wPdRDMUXpkwg8Vfw5b6fHqi2mej";
