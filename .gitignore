@@ -1,0 +1,10 @@
+.anchor
+.DS_Store
+target
+**/*.rs.bk
+node_modules
+test-ledger
+.yarn
+
+## necessary to use anchor spl - run command in terminal
+# cargo update -p solana-zk-token-sdk@2.0.1 --precise 1.18.17
