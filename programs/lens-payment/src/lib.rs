@@ -1,11 +1,22 @@
 use anchor_lang::prelude::*;
 declare_id!("4JwBm4nCWHmxRrtc2bSeM6idcsgoBkNdq8VNyFdYYVbR");
 
-const CREATOR: &str = "58V6myLoy5EVJA3U2wPdRDMUXpkwg8Vfw5b6fHqi2mej";
-const LAMPORTS_PER_SEC: u64 = 100;
+const CREATOR: &str = "Ddi1GaugnX9yQz1WwK1b12m4o23rK1krZQMcnt2aNW97";
 #[program]
 pub mod lens_payment {
     use super::*;
+    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
+        ctx.accounts.global_data_account.lamports_per_sec = 100;
+        Ok(())
+    }
+    pub fn modify_global_data(ctx: Context<ModifyGlobalData>, lamports_per_sec: u64) -> Result<()> {
+        let supposed = CREATOR.parse::<Pubkey>().unwrap();
+        if ctx.accounts.signer.key() != supposed.key() {
+            return Err(CustomError::Unauthorized.into())
+        }
+        ctx.accounts.global_data_account.lamports_per_sec = lamports_per_sec;
+        Ok(())
+    }
     pub fn initialize_payment_account(ctx: Context<InitializePaymentAccount>, id: String, level: u8) -> Result<()> {
         if level < 1 {
             return Err(CustomError::InvalidLevel.into())
@@ -18,7 +29,7 @@ pub mod lens_payment {
         Ok(())
     }
     pub fn pay(ctx: Context<Pay>, id: String, level: u8, amount: u64) -> Result<()> {
-        let lamports_needed = (amount * level as u64) * LAMPORTS_PER_SEC;
+        let lamports_needed = (amount * level as u64) * ctx.accounts.global_data_account.lamports_per_sec;
         anchor_lang::system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -38,7 +49,7 @@ pub mod lens_payment {
         Ok(())
     }
     pub fn cancel(ctx: Context<Cancel>, id: String, level: u8, amount: u64) -> Result<()> {
-        let payback = (amount * level as u64) * LAMPORTS_PER_SEC;
+        let payback = (amount * level as u64) * ctx.accounts.global_data_account.lamports_per_sec;
         let time = Clock::get()?.unix_timestamp as u64;
         if ctx.accounts.payment_account.until - amount < time {
             return Err(CustomError::CannotCancelPast.into())
@@ -50,14 +61,14 @@ pub mod lens_payment {
     }
     pub fn withdraw(ctx: Context<Withdraw>, id: String, level: u8) -> Result<()> {
         let supposed = CREATOR.parse::<Pubkey>().unwrap();
-        // if ctx.accounts.signer.key() != supposed.key() {
-        //     return Err(CustomError::Unauthorized.into())
-        // }
+        if ctx.accounts.signer.key() != supposed.key() {
+            return Err(CustomError::Unauthorized.into())
+        }
         let time = Clock::get()?.unix_timestamp as u64;
         let min_rent = Rent::get()?.minimum_balance(8);
         let transfer = if ctx.accounts.payment_account.until > time {
-            let remaining = (ctx.accounts.payment_account.until - time) * (level as u64) * LAMPORTS_PER_SEC;
-            msg!("{}, {}, {}", ctx.accounts.payment_holder_account.get_lamports(), remaining, min_rent);
+            let remaining = (ctx.accounts.payment_account.until - time) * (level as u64) * ctx.accounts.global_data_account.lamports_per_sec;
+            //msg!("{}, {}, {}", ctx.accounts.payment_holder_account.get_lamports(), remaining, min_rent);
             ctx.accounts.payment_holder_account.get_lamports() - remaining - min_rent
         } else {
             ctx.accounts.payment_holder_account.get_lamports() - min_rent // lamport balance minus minimum required
@@ -78,7 +89,34 @@ pub enum CustomError {
     #[msg("Overflow error")]
     OverflowError
 }
-
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(
+        init,
+        seeds = [b"global"],
+        bump,
+        payer = signer,
+        space = 8 + 8
+    )]
+    pub global_data_account: Account<'info, GlobalDataAccount>,
+    pub system_program: Program<'info, System>,
+}
+#[account]
+pub struct GlobalDataAccount {
+    lamports_per_sec: u64,
+}
+#[derive(Accounts)]
+pub struct ModifyGlobalData<'info> {
+    pub signer: Signer<'info>,
+    #[account(
+        mut,
+        seeds = [b"global"],
+        bump,
+    )]
+    pub global_data_account: Account<'info, GlobalDataAccount>,
+}
 #[account]
 pub struct PaymentAccount {
     id: String,
@@ -129,6 +167,11 @@ pub struct Pay<'info> {
     )]
     /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
+    #[account(
+        seeds = [b"global"],
+        bump,
+    )]
+    pub global_data_account: Account<'info, GlobalDataAccount>,
     pub system_program: Program<'info, System>,
 }
 #[derive(Accounts)]
@@ -149,6 +192,11 @@ pub struct Cancel<'info> {
     )]
     /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
+    #[account(
+        seeds = [b"global"],
+        bump,
+    )]
+    pub global_data_account: Account<'info, GlobalDataAccount>,
 }
 #[derive(Accounts)]
 #[instruction(id: String, level: u8)]
@@ -168,4 +216,9 @@ pub struct Withdraw<'info> {
     )]
     /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
+    #[account(
+        seeds = [b"global"],
+        bump,
+    )]
+    pub global_data_account: Account<'info, GlobalDataAccount>,
 }
