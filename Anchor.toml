@@ -5,13 +5,13 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-lens_payment = "4JwBm4nCWHmxRrtc2bSeM6idcsgoBkNdq8VNyFdYYVbR"
+lens_payment = "HqzzWgrEX3epRnsNMUNQPapFbAg8dLCSxskhCrz7NLnk"
 
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

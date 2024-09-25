@@ -1,11 +1,10 @@
 use anchor_lang::prelude::*;
-declare_id!("4JwBm4nCWHmxRrtc2bSeM6idcsgoBkNdq8VNyFdYYVbR");
+use anchor_lang::solana_program::native_token::LAMPORTS_PER_SOL;
+declare_id!("HqzzWgrEX3epRnsNMUNQPapFbAg8dLCSxskhCrz7NLnk");
 
 const CREATOR: &str = "Ddi1GaugnX9yQz1WwK1b12m4o23rK1krZQMcnt2aNW97";
 #[program]
 pub mod lens_payment {
-    use anchor_lang::solana_program::native_token::LAMPORTS_PER_SOL;
-
     use super::*;
     pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
         ctx.accounts.global_data_account.fee_perc = 1;
@@ -23,7 +22,16 @@ pub mod lens_payment {
                 return Err(CustomError::InvalidCreator.into())
             }
         } else {
-            // transfer here, not necessary to complete yet
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.signer.to_account_info(),
+                        to: ctx.accounts.global_holder_account.to_account_info()
+                    }
+                ),
+                ctx.accounts.global_data_account.init_fee
+            )?;  
         }
         ctx.accounts.payment_group_account.bypass = bypass;
         ctx.accounts.payment_group_account.withdraw_authority = withdraw_authority;
@@ -40,16 +48,18 @@ pub mod lens_payment {
     pub fn pay(ctx: Context<Pay>, group_id: u64, id: u64, level: u8, amount: u64) -> Result<()> {
         let lamports_needed = (amount * level as u64) * ctx.accounts.payment_group_account.lamports_per_sec;
         let fee = lamports_needed * ctx.accounts.global_data_account.fee_perc / 100;
-        anchor_lang::system_program::transfer(
-            CpiContext::new(
-                ctx.accounts.system_program.to_account_info(),
-                anchor_lang::system_program::Transfer {
-                    from: ctx.accounts.signer.to_account_info(),
-                    to: ctx.accounts.global_holder_account.to_account_info()
-                }
-            ),
-            fee
-        )?;
+        if !ctx.accounts.payment_group_account.bypass {
+            anchor_lang::system_program::transfer(
+                CpiContext::new(
+                    ctx.accounts.system_program.to_account_info(),
+                    anchor_lang::system_program::Transfer {
+                        from: ctx.accounts.signer.to_account_info(),
+                        to: ctx.accounts.global_holder_account.to_account_info()
+                    }
+                ),
+                fee
+            )?;   
+        }
         anchor_lang::system_program::transfer(
             CpiContext::new(
                 ctx.accounts.system_program.to_account_info(),
@@ -58,7 +68,7 @@ pub mod lens_payment {
                     to: ctx.accounts.payment_holder_account.to_account_info(),
                 }
             ),
-            lamports_needed - fee
+            lamports_needed
         )?;
         let time = Clock::get()?.unix_timestamp as u64;
         if ctx.accounts.payment_account.until < time {
@@ -88,9 +98,10 @@ pub mod lens_payment {
         let min_rent = Rent::get()?.minimum_balance(8);
         let transfer = if ctx.accounts.payment_account.until > time {
             let remaining = (ctx.accounts.payment_account.until - time) * (level as u64) * ctx.accounts.payment_group_account.lamports_per_sec;
-            //msg!("{}, {}, {}", ctx.accounts.payment_holder_account.get_lamports(), remaining, min_rent);
+            msg!("{}, {}, {}", ctx.accounts.payment_holder_account.get_lamports(), remaining, min_rent);
             ctx.accounts.payment_holder_account.get_lamports() - remaining - min_rent
         } else {
+            msg!("nope");
             ctx.accounts.payment_holder_account.get_lamports() - min_rent // lamport balance minus minimum required
         };
         **ctx.accounts.payment_holder_account.try_borrow_mut_lamports()? -= transfer;
@@ -98,7 +109,7 @@ pub mod lens_payment {
         Ok(())
     }
     pub fn withdraw_program_funds(ctx: Context<WithdrawProgramFunds>) -> Result<()> {
-        let min_rent = Rent::get()?.minimum_balance(9);
+        let min_rent = Rent::get()?.minimum_balance(8);
         let transfer = ctx.accounts.global_holder_account.get_lamports() - min_rent;
         **ctx.accounts.global_holder_account.try_borrow_mut_lamports()? -= transfer;
         **ctx.accounts.signer.try_borrow_mut_lamports()? += transfer;
@@ -198,6 +209,7 @@ pub struct CreatePaymentGroup<'info> {
         payer = signer,
         space = 8,
     )]
+    /// CHECK:
     pub payment_group_holder_account: AccountInfo<'info>,
     #[account(
         seeds = [b"global"],
@@ -205,6 +217,14 @@ pub struct CreatePaymentGroup<'info> {
     )]
     pub global_data_account: Account<'info, GlobalDataAccount>,
     #[account(
+        mut,
+        seeds = [b"holder"],
+        bump,
+    )]
+    /// CHECK: 
+    pub global_holder_account: AccountInfo<'info>,
+    #[account(
+        mut,
         constraint = creator.key() == CREATOR.parse::<Pubkey>().unwrap() @ CustomError::InvalidCreator
     )]
     /// CHECK: 
@@ -247,6 +267,7 @@ pub struct Pay<'info> {
         payer = signer,
         space = 8,
     )]
+    /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
     #[account(
         seeds = [b"group", group_id.to_le_bytes().as_ref()],
@@ -259,6 +280,7 @@ pub struct Pay<'info> {
     )]
     pub global_data_account: Account<'info, GlobalDataAccount>,
     #[account(
+        mut,
         seeds = [b"holder"],
         bump,
     )]
@@ -284,6 +306,7 @@ pub struct Cancel<'info> {
         seeds = [payment_account.key().as_ref()],
         bump,
     )]
+    /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
     #[account(
         seeds = [b"group", group_id.to_le_bytes().as_ref()],
@@ -308,6 +331,7 @@ pub struct Withdraw<'info> {
         seeds = [payment_account.key().as_ref()],
         bump,
     )]
+    /// CHECK: 
     pub payment_holder_account: AccountInfo<'info>,
     #[account(
         seeds = [b"group", group_id.to_le_bytes().as_ref()],
